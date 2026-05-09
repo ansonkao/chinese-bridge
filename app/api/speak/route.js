@@ -12,13 +12,18 @@ export async function POST(req) {
     );
   }
 
-  const { english } = await req.json();
+  const { english, dialect = 'mandarin' } = await req.json();
   if (!english || typeof english !== 'string') {
     return new Response(JSON.stringify({ error: 'Missing english text' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  const dialectInstruction =
+    dialect === 'cantonese'
+      ? 'natural, conversational Cantonese (廣東話). Use colloquial Cantonese vocabulary and particles (e.g. 係, 喺, 唔, 咋, 囉, 啩, 呀), not Mandarin.'
+      : 'natural, conversational Mandarin Chinese (普通話).';
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -33,7 +38,7 @@ export async function POST(req) {
       messages: [
         {
           role: 'user',
-          content: `Translate this English question to natural, conversational Mandarin Chinese. Output only the Chinese translation, nothing else:\n\n${english}`,
+          content: `Translate this English question to ${dialectInstruction} Output only the Chinese translation, nothing else:\n\n${english}`,
         },
       ],
     }),

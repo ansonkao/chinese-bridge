@@ -17,6 +17,16 @@ export default function Home() {
     const conversationContext = [];
     let isGeneratingSuggestions = false;
 
+    function isCantoneseLang(lang) {
+      const l = lang.toLowerCase();
+      return l.includes('hk') || l.startsWith('yue');
+    }
+
+    function getDialectLang() {
+      const dialectSelect = document.getElementById('dialect-select');
+      return dialectSelect && dialectSelect.value === 'cantonese' ? 'yue-Hant-HK' : 'zh-CN';
+    }
+
     function initSpeechRecognition() {
       if (
         !('webkitSpeechRecognition' in window) &&
@@ -27,13 +37,15 @@ export default function Home() {
       }
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognition = new SR();
-      recognition.lang = 'zh-CN';
+      recognition.lang = getDialectLang();
+      console.log('[speech] init lang:', recognition.lang);
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         isListening = true;
+        console.log('[speech] session started, lang:', recognition.lang);
         updateListeningUI(true);
       };
       recognition.onend = () => {
@@ -232,10 +244,11 @@ export default function Home() {
       section.scrollTop = section.scrollHeight;
 
       try {
+        const dialect = document.getElementById('dialect-select')?.value || 'mandarin';
         const response = await fetch('/api/suggestions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context: conversationContext }),
+          body: JSON.stringify({ context: conversationContext, dialect }),
         });
         const data = await response.json();
         const questions = Array.isArray(data.questions) ? data.questions : [];
@@ -254,7 +267,8 @@ export default function Home() {
       if (!chineseText) return;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(chineseText);
-      utterance.lang = 'zh-CN';
+      const isCantonese = getDialectLang() === 'yue-Hant-HK';
+      utterance.lang = isCantonese ? 'yue-Hant-HK' : 'zh-CN';
       utterance.rate = 0.9;
       utterance.pitch = 1.0;
       const voices = window.speechSynthesis.getVoices();
@@ -266,12 +280,11 @@ export default function Home() {
       if (selected) {
         utterance.voice = selected;
       } else {
-        const cnVoice = voices.find(
-          (v) =>
-            v.lang.startsWith('zh') ||
-            v.lang.includes('CN') ||
-            v.lang.includes('TW')
-        );
+        const cnVoice = voices.find((v) =>
+          isCantonese
+            ? isCantoneseLang(v.lang)
+            : !isCantoneseLang(v.lang) && v.lang.toLowerCase().startsWith('zh')
+        ) || voices.find((v) => v.lang.toLowerCase().startsWith('zh'));
         if (cnVoice) utterance.voice = cnVoice;
       }
       if (chipEl) {
@@ -304,10 +317,11 @@ export default function Home() {
       btn.disabled = true;
       btn.textContent = 'Translating…';
       try {
+        const dialect = document.getElementById('dialect-select')?.value || 'mandarin';
         const response = await fetch('/api/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ english }),
+          body: JSON.stringify({ english, dialect }),
         });
         const data = await response.json();
         const chinese = (data.chinese || '').trim();
@@ -397,15 +411,18 @@ export default function Home() {
       const voiceSelect = document.getElementById('voice-select');
       if (!voiceSelect) return;
       const voices = window.speechSynthesis.getVoices();
+      const isCantonese = getDialectLang() === 'yue-Hant-HK';
       const cnVoices = voices.filter((v) => {
         const l = v.lang.toLowerCase();
-        return (
+        const isChinese =
           l.startsWith('zh') ||
           l.startsWith('cmn') ||
+          l.startsWith('yue') ||
           l.includes('cn') ||
           l.includes('tw') ||
-          l.includes('hk')
-        );
+          l.includes('hk');
+        if (!isChinese) return false;
+        return isCantonese ? isCantoneseLang(v.lang) : !isCantoneseLang(v.lang);
       });
       // Priority: lower number sorts earlier. Tingting is the preferred
       // macOS Chinese voice; other "better" indicators come next.
@@ -463,6 +480,24 @@ export default function Home() {
       });
     }
 
+    const dialectSelectEl = document.getElementById('dialect-select');
+    if (dialectSelectEl) {
+      const savedDialect = localStorage.getItem('cb-dialect');
+      if (savedDialect) dialectSelectEl.value = savedDialect;
+      dialectSelectEl.addEventListener('change', () => {
+        localStorage.setItem('cb-dialect', dialectSelectEl.value);
+        populateVoiceSelect();
+        if (recognition) {
+          recognition.lang = getDialectLang();
+          console.log('[speech] dialect changed, new lang:', recognition.lang);
+          if (isListening) {
+            try { recognition.stop(); } catch (_) {}
+            // onend auto-restarts when isListening is true, picking up the new lang
+          }
+        }
+      });
+    }
+
     initSpeechRecognition();
   }, []);
 
@@ -475,6 +510,15 @@ export default function Home() {
           <span className="wordmark-en">Interview Assistant</span>
         </div>
         <div className="header-status">
+          <div className="voice-row">
+            <label className="voice-label" htmlFor="dialect-select">
+              Dialect
+            </label>
+            <select id="dialect-select" className="voice-select">
+              <option value="mandarin">Mandarin</option>
+              <option value="cantonese">Cantonese</option>
+            </select>
+          </div>
           <div className="voice-row">
             <label className="voice-label" htmlFor="voice-select">
               Voice
